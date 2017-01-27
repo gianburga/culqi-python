@@ -76,10 +76,30 @@ class Iins:
 Iins = Iins()
 
 
+class CulqiError(Exception):
+    def __init__(self, message=None, error_code=None, detail=None):
+        super(CulqiError, self).__init__(message)
+        self.detail = detail
+        self.error_code = error_code
+
+class TokenError(CulqiError):
+    pass
+
+class TokenValidationError(TokenError):
+    pass
+
+class ChargeError(CulqiError):
+    pass
+
+class ChargeOperationDeniedError(CulqiError):
+    pass
+
+
 class Token:
     URL = "/tokens/"
 
-    def create(self, card_number, currency_code, cvv, exp_month, exp_year,
+    @classmethod
+    def create(cls, card_number, currency_code, cvv, exp_month, exp_year,
                fingerprint, last_name, email, first_name):
         token = ObjectHelper()
         token.card_number = card_number
@@ -91,31 +111,30 @@ class Token:
         token.last_name = last_name
         token.email = email
         token.first_name = first_name
-        return Util().json_result(
-            culqipy.COD_COMMERCE,
-            self.URL,
-            token.to_json(), "POST")
+        response = Util().json_result(culqipy.COD_COMMERCE, cls.URL, token.to_json(), "POST")
 
-    def get(self, id):
-        return Util().json_result(
-                culqipy.API_KEY,
-                self.URL + id + "/",
-                "", "GET")
+        if response['object'] == 'error':
+            raise TokenValidationError(error_code=response['code'], message=response['message'])
+        return response
+
+    @classmethod
+    def get(cls, id):
+        url = '{url}{id}/'.format(url=cls.URL, id=id)
+        return Util().json_result(culqipy.API_KEY, url, "", "GET")
 
 
-Token = Token()
+# Token = Token()
 
 
 class Charge:
     URL = "/charges/"
 
-    def list(self, params):
-        return Util().json_result(
-                culqipy.API_KEY,
-                self.URL,
-                params, "GET")
+    @classmethod
+    def list(cls, params):
+        return Util().json_result(culqipy.API_KEY, cls.URL, params, "GET")
 
-    def create(self, address, address_city, amount, country_code,
+    @classmethod
+    def create(cls, address, address_city, amount, country_code,
                currency_code, email, first_name, installments,
                last_name, metadata, phone_number,
                product_description, token_id):
@@ -133,18 +152,26 @@ class Charge:
         charge.phone_number = phone_number
         charge.product_description = product_description
         charge.token_id = token_id
-        return Util().json_result(
-                culqipy.API_KEY,
-                self.URL,
-                charge.to_json(), "POST")
 
-    def get(self, id):
-        return Util().json_result(
-                culqipy.API_KEY,
-                self.URL + id + "/",
-                "", "GET")
+        response = Util().json_result(culqipy.API_KEY, cls.URL, charge.to_json(), "POST")
+        if response['object'] == 'error':
+            if response['type'] == 'operacion_denegada':
+                raise ChargeOperationDeniedError(
+                    message=response['message'], error_code=response['code'], detail={
+                        'error': response['user_message'],
+                        'raw': response
+                    })
+            raise ChargeError(message=response['message'], error_code=response['code'], detail={
+                'error': response['user_message'],
+                'raw': response
+            })
+        return response
 
-Charge = Charge()
+    @classmethod
+    def get(cls, id):
+        return Util().json_result(culqipy.API_KEY, cls.URL + id + "/", "", "GET")
+
+# Charge = Charge()
 
 
 class Plan:
